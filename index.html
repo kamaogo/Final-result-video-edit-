@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Messenger with Built-in Keyboard & Video</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+<style>
+:root{--bg:#F1F8F6;--main:#128C7E;--me:#dcf8c6}
+*{box-sizing:border-box;font-family:system-ui}
+html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;display:flex;flex-direction:column}
+
+header{
+  background:linear-gradient(135deg,#128C7E,#0ea5a4);
+  color:white;padding:12px;
+  display:flex;align-items:center;
+  min-height:60px;
+}
+#status{font-size:12px;opacity:.9}
+
+.page{display:none;flex-grow:1;overflow:hidden}
+.btn{width:100%;padding:14px;border:none;border-radius:14px;background:var(--main);color:white;margin:8px 0}
+input{width:100%;padding:12px;border-radius:12px;border:1px solid #ddd;margin:6px 0}
+
+/* Chat */
+#chat{display:flex;flex-direction:column}
+#messages{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column}
+.msg{max-width:75%;padding:12px;margin:6px 0;border-radius:14px;background:white}
+.me{background:var(--me);margin-left:auto}
+
+/* Input */
+#inputContainer{background:white;border-top:1px solid #ddd}
+.file-container{padding:10px;display:flex;justify-content:space-between;align-items:center}
+/* Updated file input to accept video */
+#text{border:none;background:#f0f0f0;margin:0 10px 10px;width:calc(100% - 20px);font-size:16px}
+
+/* Emoji */
+#emojiBox{
+  display:none;
+  background:white;
+  padding:10px;
+  grid-template-columns:repeat(7,1fr);
+  gap:10px;
+  font-size:22px;
+  border-top:1px solid #ddd
+}
+#emojiBox span{cursor:pointer}
+
+/* ===== NORMAL STYLE KEYBOARD ===== */
+#kbBox{
+  display:none;
+  background:#e5e7eb;
+  padding:8px 6px;
+  border-top:1px solid #ccc;
+}
+
+.kb-row{
+  display:flex;
+  justify-content:center;
+  margin-bottom:6px;
+}
+
+.key{
+  background:white;
+  border-radius:8px;
+  padding:12px 0;
+  margin:3px;
+  min-width:32px;
+  text-align:center;
+  font-size:16px;
+  font-weight:600;
+  box-shadow:0 1px 2px rgba(0,0,0,.25);
+  cursor:pointer;
+  user-select:none;
+}
+
+.key:active{
+  background:#d1d5db;
+  transform:scale(.95);
+}
+
+.key-wide{min-width:55px}
+.key-space{flex:1}
+.key-enter{background:var(--main);color:white}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div id="status">🔴 Connecting...</div>
+</header>
+
+<div class="page" id="home" style="display:block">
+  <button class="btn" onclick="show('add')">➕ Add Friend</button>
+</div>
+
+<div class="page" id="add">
+  <input id="mycode" readonly>
+  <button class="btn" onclick="copyCode()">Copy My ID</button>
+  <input id="friendcode" placeholder="Friend ID">
+  <button class="btn" onclick="connect()">Connect</button>
+  <button class="btn" onclick="show('home')" style="background:#6b7280">⬅ Back</button>
+</div>
+
+<div class="page" id="chat">
+  <div id="messages"></div>
+
+  <div id="emojiBox">
+    <span onclick="addEmoji('😀')">😀</span>
+    <span onclick="addEmoji('😂')">😂</span>
+    <span onclick="addEmoji('😍')">😍</span>
+    <span onclick="addEmoji('😎')">😎</span>
+    <span onclick="addEmoji('👍')">👍</span>
+    <span onclick="addEmoji('❤️')">❤️</span>
+  </div>
+
+  <div id="inputContainer">
+    <div class="file-container">
+      <input type="file" id="file" accept="image/*,video/*" style="width:auto">
+      <span onclick="toggleEmoji()" style="font-size:24px; cursor:pointer">😊</span>
+    </div>
+    <input id="text" readonly placeholder="Type message" onclick="openKB()">
+  </div>
+
+  <div id="kbBox"></div>
+</div>
+
+<script>
+let peer=new Peer(),conn,isCaps=false;
+const rows=[
+  "qwertyuiop",
+  "asdfghjkl",
+  "zxcvbnm"
+];
+
+function show(p){
+  document.querySelectorAll('.page').forEach(x=>x.style.display="none");
+  document.getElementById(p).style.display=(p==="chat")?"flex":"block";
+}
+
+peer.on("open",id=>{
+  mycode.value=id;
+  status.innerText="🟡 Ready";
+});
+
+peer.on("connection",c=>{
+  conn=c;setup();show("chat");
+});
+
+function connect(){
+  conn=peer.connect(friendcode.value);
+  setup();show("chat");
+}
+
+function setup(){
+  conn.on("open",()=>status.innerText="🟢 Connected");
+  conn.on("data",d=>{
+    if(typeof d==="string") addMsg(d,false);
+    else if(d.type === 'image') addImage(d.data,false);
+    else if(d.type === 'video') addVideo(d.data,false);
+  });
+}
+
+function openKB(){
+  kbBox.style.display="block";
+  emojiBox.style.display="none";
+  renderKB();
+}
+
+function renderKB(){
+  kbBox.innerHTML="";
+  rows.forEach(r=>{
+    let row=document.createElement("div");
+    row.className="kb-row";
+    [...r].forEach(k=>{
+      let key=document.createElement("div");
+      key.className="key";
+      key.innerText=isCaps?k.toUpperCase():k;
+      key.onclick=()=>text.value+=key.innerText;
+      row.appendChild(key);
+    });
+    kbBox.appendChild(row);
+  });
+
+  let row=document.createElement("div");
+  row.className="kb-row";
+  row.innerHTML=`
+    <div class="key key-wide" onclick="isCaps=!isCaps;renderKB()">CAPS</div>
+    <div class="key key-wide" onclick="text.value=text.value.slice(0,-1)">⌫</div>
+    <div class="key key-space" onclick="text.value+=' '">Space</div>
+    <div class="key key-wide key-enter" onclick="send()">Enter</div>`;
+  kbBox.appendChild(row);
+}
+
+function send(){
+  if(!conn) return;
+  const fileInput = document.getElementById('file');
+  
+  if(fileInput.files.length){
+    let file = fileInput.files[0];
+    let r=new FileReader();
+    r.onload=e=>{
+      if(file.type.startsWith('image/')){
+        conn.send({type:'image',data:e.target.result});
+        addImage(e.target.result,true);
+      } else if(file.type.startsWith('video/')){
+        conn.send({type:'video',data:e.target.result});
+        addVideo(e.target.result,true);
+      }
+      fileInput.value="";
+    }
+    r.readAsDataURL(file);
+  }else if(text.value){
+    conn.send(text.value);
+    addMsg(text.value,true);
+    text.value="";
+  }
+}
+
+function addMsg(m,me){
+  let d=document.createElement("div");
+  d.className="msg"+(me?" me":"");
+  d.innerText=m;
+  messages.appendChild(d);
+  messages.scrollTop=messages.scrollHeight;
+}
+
+function addImage(u,me){
+  let d=document.createElement("div");
+  d.className="msg"+(me?" me":"");
+  let i=document.createElement("img");
+  i.src=u;i.style.maxWidth="200px";i.style.borderRadius="10px";
+  d.appendChild(i);
+  messages.appendChild(d);
+  messages.scrollTop=messages.scrollHeight;
+}
+
+// New function to handle Video messages
+function addVideo(u,me){
+  let d=document.createElement("div");
+  d.className="msg"+(me?" me":"");
+  let v=document.createElement("video");
+  v.src=u;
+  v.controls=true;
+  v.style.maxWidth="200px";
+  v.style.borderRadius="10px";
+  d.appendChild(v);
+  messages.appendChild(d);
+  messages.scrollTop=messages.scrollHeight;
+}
+
+function toggleEmoji(){
+  emojiBox.style.display=emojiBox.style.display==="grid"?"none":"grid";
+  kbBox.style.display="none";
+}
+
+function addEmoji(e){text.value+=e}
+
+function copyCode(){
+  mycode.select();
+  document.execCommand("copy");
+  alert("Copied");
+}
+</script>
+</body>
+</html>
